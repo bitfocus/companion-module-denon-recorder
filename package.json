@@ -1,0 +1,30 @@
+{
+  "name": "denon-dn-900r",
+	"version": "1.0.0",
+	"api_version": "1.0.0",
+	"description": "Denon DN-900R",
+	"keywords": [
+		"SD Recorder",
+		"USB Recorder"
+	],
+	"manufacturer": "Denon",
+	"product": ["DN-900R","DN-700R","DN-500R"],
+	"shortname": "DN-900R",
+	"homepage": "https://github.com/bitfocus/companion-module-denon-dn-900r#readme",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bitfocus/companion-module-denon-dn-900r.git"
+	},
+	"author": "John A Knight Jr <jjr@ayesti.com>",
+	"contributors": [
+		"Andreas H. Thomsen <mc-hauge@hotmail.com>"
+	],
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/bitfocus/companion-module-denon-dn-900r/issues"
+	}
+}

@@ -84,7 +84,7 @@ instance.prototype.init_tcp = function () {
 
 		self.socket.on('data', function (chunk) {
 			var hasAck = chunk.readInt8(0) == 6;
-			var resp = chunk.toString(undefined,1);
+			var resp = chunk.toString(undefined, hasAck ? 1: 0);
 
 			debug("Received " + chunk.length + " bytes of data.", chunk);
 			// response or auto-status?

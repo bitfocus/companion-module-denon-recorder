@@ -7,3 +7,6 @@ An ethernet to rs-232 module is required to control the DN-500R
 * base module derived from denon-dn-500bd-mkii by Andreas H. Thomsen <mc-hauge@hotmail.com>
 * stripped invalid actions (no tray)
 * added recording actions
+*
+* Minimal Record / Play control
+* Feedback for the limited commands implemented

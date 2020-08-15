@@ -19,6 +19,11 @@ function instance(system, id, config) {
 	// super-constructor
 	instance_skel.apply(this, arguments);
 
+	self.devMode = process.env.DEVELOPER;
+
+	self.powerOn = false;
+	self.transState = self.TRANS_OFF;
+	
 	self.actions(); // export actions
 	self.init_presets();
 
@@ -33,6 +38,10 @@ instance.prototype.updateConfig = function (config) {
 		self.socket.destroy();
 		delete self.socket;
 	}
+	if (self.heartbeat) {
+		clearInterval(self.heartbeat);
+		delete self.heartbeat;
+	}
 
 	self.config = config;
 	self.init_tcp();
@@ -45,13 +54,26 @@ instance.prototype.init = function () {
 	debug = self.debug;
 	log = self.log;
 	self.init_presets();
+	self.init_feedbacks();
 	self.init_tcp();
+};
+
+/**
+ * heartbeat to request updates, device gets bored after 5 minutes
+ */
+ instance.prototype.pulse = function () {
+	var self = this;
+	self.socket.send('@0?PW\r');
 };
 
 instance.prototype.init_tcp = function () {
 	var self = this;
 
 	if (self.socket !== undefined) {
+		if (self.heartbeat) {
+			clearInterval(self.heartbeat);
+			delete self.heartbeat;
+		}
 		self.socket.destroy();
 		delete self.socket;
 	}
@@ -61,11 +83,22 @@ instance.prototype.init_tcp = function () {
 	if (self.config.host) {
 		self.socket = new tcp(self.config.host, self.config.port);
 
-		// self.socket.on('status_change', function (status, message) {
-		// 	self.status(status, message);
-		// });
+		self.socket.on('end', function() {
+			debug("Closed");
+			self.status(self.STATE_ERROR, 'Closed');
+			self.log('info',"Connection Closed");
+			if (self.heartbeat) {
+				clearInterval(self.heartbeat);
+				delete self.heartbeat;
+			}
+			self.hasError = true;
+		});
 
 		self.socket.on('error', function (err) {
+			if (self.heartbeat) {
+				clearInterval(self.heartbeat);
+				delete self.heartbeat;
+			}
 			if (!self.hasError) {
 				debug("Network error", err);
 				self.status(self.STATE_ERROR, err.message);
@@ -76,15 +109,19 @@ instance.prototype.init_tcp = function () {
 
 		self.socket.on('connect', function () {
 			self.status(self.STATE_OK);
+			self.heartbeat = setInterval( function () { self.pulse(); }, 60000);
 			self.hasError = false;
 			debug("Connected");
-			console.log("Sending @0?PW");
+			if (self.devMode) {
+				console.log("Sending @0?PW");
+			}
 			self.socket.send("@0?PW\r");
 		});
 
 		self.socket.on('data', function (chunk) {
 			var hasAck = chunk.readInt8(0) == 6;
-			var resp = chunk.toString(undefined, hasAck ? 1: 0);
+			var resp = chunk.toString(undefined, (hasAck ? 3 : 2)).slice(0, -1);
+			var isPower = false;
 
 			debug("Received " + chunk.length + " bytes of data.", chunk);
 			// response or auto-status?
@@ -92,11 +129,54 @@ instance.prototype.init_tcp = function () {
 			// status request response
 			debug("Response is: '" + resp + "'");
 
-			console.log("Received " + chunk.length + " bytes of data.", chunk);
-			// response or auto-status?
-			console.log("First character is ACK: ", hasAck);
-			// status request response
-			console.log("Response is: '" + resp + "'");
+			if (self.devMode) {
+				console.log("Received " + chunk.length + " bytes of data.", chunk);
+				console.log("First character is ACK: ", hasAck);
+				console.log("Response is: '" + resp + "'");
+			}
+			switch (resp) {
+			case 'PW00':
+			case 'PW01':
+			case 'PW02':
+				self.powerOn = 'PW00' == resp;
+				if (self.powerOn) {
+					isPower = true;
+					if (self.devMode) {
+						console.log("Sending @0?ST");
+					}
+					self.socket.send("@0?ST\r");
+				} else {
+					resp = 'STOF';
+				}
+				self.checkFeedbacks('power');
+				break;
+			case 'STAB':
+				resp = 'STPL';
+				break;
+			case 'STPR':
+				resp = 'STPP';
+				break;
+			case 'STCE':
+				resp = 'STOF';
+				break;
+			case 'STRE':
+			case 'STRP':
+			case 'STPL':
+			case 'STPP':
+			case 'STST':
+				break;
+			default:	// something we don't track
+				resp = '';
+			}
+			if (!isPower && '' != resp) {
+				self.transState = resp;
+				self.checkFeedbacks('transport');
+			}
+			// no ack means status update from unit, respond with ACK
+			if (!hasAck) {
+				self.socket.send(String.fromCharCode(6));
+
+			}
 		});
 	}
 };
@@ -132,9 +212,41 @@ instance.prototype.destroy = function () {
 	if (self.socket !== undefined) {
 		self.socket.destroy();
 	}
+	if (self.heartbeat) {
+		clearInterval(self.heartbeat);
+		delete self.heartbeat;
+	}
 
 	debug("destroy", self.id);
 };
+
+
+instance.prototype.CHOICES_TRANSPORT = [
+	{
+		id: 'STOF',
+		label: 'Transport Off'
+	},
+	{
+		id: 'STST',
+		label: 'Stopped'
+	},
+	{
+		id: 'STPL',
+		label: 'Playing'
+	},
+	{
+		id: 'STPP',
+		label: 'Paused'
+	},
+	{
+		id: 'STRP',
+		label: 'Record Pause'
+	},
+	{
+		id: 'STRE',
+		label: 'Recording'
+	}
+];
 
 instance.prototype.CHOICES_POWER = [
 	{
@@ -467,12 +579,91 @@ instance.prototype.init_presets = function () {
 					options: {
 						sel_cmd: self.CHOICES_PANEL_LOCK[input].id,
 					}
-				}]
+				}
+			]
 		});
 	}
 
 	self.setPresetDefinitions(presets);
 };
+
+instance.prototype.init_feedbacks = function() {
+	var self = this;
+
+	self.setFeedbackDefinitions ( {
+
+		transport: {
+			label: 'Color for Transport Mode',
+			description: 'Set Button colors for Off, Play, Pause,\nRec Pause, Recording',
+			options: [{
+				type: 'colorpicker',
+				label: 'Foreground color',
+				id: 'fg',
+				default: '16777215'
+			},
+			{
+				type: 'colorpicker',
+				label: 'Background color',
+				id: 'bg',
+				default: rgb(32, 32, 32)
+			},
+			{
+				type: 'dropdown',
+				label: 'Which Mode?',
+				id: 'type',
+				default: 'STOF',
+				choices: self.CHOICES_TRANSPORT
+			}],
+			callback: function(feedback, bank) {
+				var ret = {};
+				var options = feedback.options;
+				var type = options.type;
+
+				if (type == self.transState) {
+					ret = { color: options.fg, bgcolor: options.bg };
+				}
+				return ret;
+			}
+		},
+		power: {
+			label: 'Color for Power Status',
+			description: 'Set Button colors on Power Status',
+			options: [{
+				type: 'colorpicker',
+				label: 'Foreground color',
+				id: 'fg',
+				default: '16777215'
+			},
+			{
+				type: 'colorpicker',
+				label: 'Background color',
+				id: 'bg',
+				default: rgb(32, 32, 32)
+			},
+			{
+				type: 'dropdown',
+				label: 'State',
+				id: 'state',
+				default: '0',
+				choices: [
+					{ id: '0', label: "Power On" },
+					{ id: '1', label: "Power Off"}
+				]
+			}],
+			callback: function(feedback, bank) {
+				var ret = {};
+				var options = feedback.options;
+				var state = options.state;
+
+				if (state == (self.powerOn ? '0': '1')) {
+					ret = { color: options.fg, bgcolor: options.bg };
+				}
+				return ret;
+			}
+		}
+	});
+};
+
 
 instance.prototype.actions = function (system) {
 	var self = this;
@@ -573,49 +764,51 @@ instance.prototype.actions = function (system) {
 instance.prototype.action = function (action) {
 	var self = this;
 	var cmd;
+	var rePulse = false;
 
 	switch (action.action) {
 		case 'power':
 			cmd = action.options.sel_cmd;
-			a_val = "";
+			rePulse = true;
 			break;
 
 		case 'record':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 		case 'track_playback':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 		case 'track_selection':
+			cmd = action.options.sel_cmd;
 			if (action.options.sel_cmd == 'Tr') {
-				cmd = action.options.sel_cmd;
-				a_val = pad4(action.options.sel_val);
-			} else {
-				cmd = action.options.sel_cmd;
-				a_val = "";
+				cmd += pad4(action.options.sel_val);
 			}
 			break;
 
 		case 'panel_lock':
 			cmd = action.options.sel_cmd;
-			a_val = "";
-			break;
+		break;
 
 	}
 
 	if (cmd !== undefined) {
-		console.log('Send: @0' + cmd + a_val);
-		debug('sending ', "@0" + cmd + a_val, "to", self.config.host);
+		if (self.devMode) {
+			console.log('Send: @0' + cmd );
+		}
+		debug('sending ', "@0" + cmd , "to", self.config.host);
 
 		if (self.socket !== undefined && self.socket.connected) {
-			self.socket.send("@0" + cmd + a_val + "\r");
+			self.socket.send("@0" + cmd + "\r");
 		} else {
 			debug('Socket not connected :(');
 		}
+	}
+
+	// device does not reply to power commands
+	if (rePulse) {
+		self.pulse();
 	}
 };
 

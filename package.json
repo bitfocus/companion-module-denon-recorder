@@ -21,7 +21,8 @@
 	},
 	"author": "John A Knight Jr <jjr@ayesti.com>",
 	"contributors": [
-		"Andreas H. Thomsen <mc-hauge@hotmail.com>"
+		"Andreas H. Thomsen <mc-hauge@hotmail.com>",
+		"Kevin Haddock"
 	],
 	"license": "MIT",
 	"bugs": {

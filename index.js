@@ -467,7 +467,8 @@ instance.prototype.init_presets = function () {
 					options: {
 						sel_cmd: self.CHOICES_PANEL_LOCK[input].id,
 					}
-				}]
+				}
+			]
 		});
 	}
 
@@ -577,42 +578,35 @@ instance.prototype.action = function (action) {
 	switch (action.action) {
 		case 'power':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 		case 'record':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 		case 'track_playback':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 		case 'track_selection':
+			cmd = action.options.sel_cmd;
 			if (action.options.sel_cmd == 'Tr') {
-				cmd = action.options.sel_cmd;
-				a_val = pad4(action.options.sel_val);
-			} else {
-				cmd = action.options.sel_cmd;
-				a_val = "";
+				cmd += pad4(action.options.sel_val);
 			}
 			break;
 
 		case 'panel_lock':
 			cmd = action.options.sel_cmd;
-			a_val = "";
 			break;
 
 	}
 
 	if (cmd !== undefined) {
-		console.log('Send: @0' + cmd + a_val);
-		debug('sending ', "@0" + cmd + a_val, "to", self.config.host);
+		console.log('Send: @0' + cmd);
+		debug('sending ', "@0" + cmd, "to", self.config.host);
 
 		if (self.socket !== undefined && self.socket.connected) {
-			self.socket.send("@0" + cmd + a_val + "\r");
+			self.socket.send("@0" + cmd + "\r");
 		} else {
 			debug('Socket not connected :(');
 		}

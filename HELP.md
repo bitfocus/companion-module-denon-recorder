@@ -1,10 +1,11 @@
-## Denon DN-500R, DN-700R, DN-900R
+## Denon SSD/USB Recorders
 
 This module controls a Denon USB/SD recorder.
+Includes DN-700R, DN-900R, DN-500R, DN-F450R, DN-F650R
 
-The DN-500R will require an Ethernet to RS232 adapter.
+The rs232 only modules, DN-500R, DN-F450R, DN-F650R require an Ethernet to RS232 adapter.
 
-**Available commands**
+**Available commands:**
 * Power On/Off
 * Recording
 * Playback 
@@ -18,5 +19,4 @@ The DN-500R will require an Ethernet to RS232 adapter.
 * Recording / Paused
 * Power On / Off
 
-**Missing parts:**
-* Configuration commands
+Special thanks to Kevin Haddock for sponsoring the initial work on this module.

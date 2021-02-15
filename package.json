@@ -3,7 +3,7 @@
 	"legacy": [
 		"denon-dn-900r"
 	],
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"api_version": "1.0.0",
 	"description": "Denon Digital Recorder",
 	"keywords": [

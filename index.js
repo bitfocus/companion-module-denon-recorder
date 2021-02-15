@@ -23,7 +23,7 @@ function instance(system, id, config) {
 
 	self.powerOn = false;
 	self.transState = self.TRANS_OFF;
-	
+
 	self.actions(); // export actions
 	self.init_presets();
 
@@ -606,7 +606,7 @@ instance.prototype.init_feedbacks = function() {
 				type: 'colorpicker',
 				label: 'Background color',
 				id: 'bg',
-				default: rgb(32, 32, 32)
+				default: self.rgb(32, 32, 32)
 			},
 			{
 				type: 'dropdown',
@@ -639,7 +639,7 @@ instance.prototype.init_feedbacks = function() {
 				type: 'colorpicker',
 				label: 'Background color',
 				id: 'bg',
-				default: rgb(32, 32, 32)
+				default: self.rgb(32, 32, 32)
 			},
 			{
 				type: 'dropdown',

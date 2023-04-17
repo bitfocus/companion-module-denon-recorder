@@ -1,26 +1,8 @@
 {
 	"name": "denon-recorder",
-	"legacy": [
-		"denon-dn-900r"
-	],
-	"version": "1.0.2",
-	"api_version": "1.0.0",
-	"description": "Denon Digital Recorder",
-	"keywords": [
-		"SD Recorder",
-		"USB Recorder"
-	],
-	"manufacturer": "Denon",
-	"product": [
-		"DN-900R",
-		"DN-700R",
-		"DN-500R",
-		"DN-F650R",
-		"DN-F450R"
-	],
-	"shortname": "recorder",
-	"homepage": "https://github.com/bitfocus/companion-module-denon-recorder#readme",
+	"version": "2.0.0",
 	"main": "index.js",
+	"type": "module",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
@@ -28,13 +10,11 @@
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-denon-recorder.git"
 	},
-	"author": "John A Knight Jr <jjr@ayesti.com>",
-	"contributors": [
-		"Andreas H. Thomsen <mc-hauge@hotmail.com>",
-		"Kevin Haddock"
-	],
 	"license": "MIT",
-	"bugs": {
-		"url": "https://github.com/bitfocus/companion-module-denon-recorder/issues"
+	"devDependencies": {
+		"@companion-module/tools": "^1.1.0"
+	},
+	"dependencies": {
+		"@companion-module/base": "~1.2.1"
 	}
 }

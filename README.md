@@ -20,5 +20,5 @@ The rs232 only models (DN-500R, DN-F450R, DN-F650R) require an Ethernet to RS232
 **V1.0.2** julusian
 * replace system 'emit' calls
 
-*V2.0.0** istnv
+**V2.0.0** istnv
 * Refactor for Companion V3.0

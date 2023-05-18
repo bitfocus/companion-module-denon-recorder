@@ -8,11 +8,11 @@ export function compileActionDefinitions(self) {
 			self.log('debug', `sending '@0${cmd}' to ${self.config.host}`)
 		}
 
-		if (self.socket !== undefined && self.socket.connected) {
+		if (self.socket !== undefined && self.socket.isConnected) {
 			self.socket.send('@0' + cmd + '\r')
 			// request info if command not issue a response
 			if (req) {
-				self.rePulse()
+				self.pulse()
 			}
 		} else {
 			self.log('error', 'Socket not connected :(')
@@ -43,7 +43,7 @@ export function compileActionDefinitions(self) {
 			name: 'Record Functions',
 			options: [
 				{
-					type: 'text',
+					type: 'static-text',
 					id: 'info',
 					label: 'Recording Control',
 					width: 12,
@@ -64,7 +64,7 @@ export function compileActionDefinitions(self) {
 			name: 'Track Playback',
 			options: [
 				{
-					type: 'text',
+					type: 'static-text',
 					id: 'info',
 					label: 'Information',
 					width: 12,
@@ -86,7 +86,7 @@ export function compileActionDefinitions(self) {
 			name: 'Track Selection',
 			options: [
 				{
-					type: 'text',
+					type: 'static-text',
 					id: 'info',
 					label: 'Information',
 					width: 12,

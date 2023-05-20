@@ -116,19 +116,22 @@ class DNRInstance extends InstanceBase {
 			})
 
 			this.socket.on('data', function (chunk) {
-				let hasAck = chunk.readInt8(0) == 6
-				let resp = chunk.toString(undefined, hasAck ? 3 : 2).slice(0, -1)
+				let ack = 0
+				while (ack < chunk.byteLength && chunk.readInt8(ack) == 6) {
+					ack++
+				}
+				let resp = chunk.toString(undefined, ack+2).slice(0, -1)
 				let isPower = false
 
 				if (self.devMode) {
 					self.log('debug', `Received ${chunk.length} bytes of data. ${chunk}`)
 					// response or auto-status?
-					self.log('debug', 'First character is ACK: ', hasAck)
+					self.log('debug', 'Starts with ACK: ', ack)
 					// status request response
 					self.log('debug', "Response is: '" + resp + "'")
 
 					console.log('Received ' + chunk.length + ' bytes of data.', chunk)
-					console.log('First character is ACK: ', hasAck)
+					console.log('Starts with ACK: ', ack)
 					console.log("Response is: '" + resp + "'")
 				}
 				switch (resp) {
@@ -170,7 +173,7 @@ class DNRInstance extends InstanceBase {
 					self.checkFeedbacks('transport')
 				}
 				// no ack means status update from unit, respond with ACK
-				if (!hasAck) {
+				if (!ack) {
 					self.socket.send(String.fromCharCode(6))
 				}
 			})
@@ -347,6 +350,7 @@ class DNRInstance extends InstanceBase {
 	}
 
 	init_feedbacks() {
+		let self = this
 		this.setFeedbackDefinitions({
 			transport: {
 				type: 'advanced',
@@ -378,7 +382,7 @@ class DNRInstance extends InstanceBase {
 					let options = feedback.options
 					let type = options.type
 
-					if (type == this.transState) {
+					if (type == self.transState) {
 						ret = { color: options.fg, bgcolor: options.bg }
 					}
 					return ret
@@ -396,7 +400,7 @@ class DNRInstance extends InstanceBase {
 					{
 						type: 'dropdown',
 						label: 'Status?',
-						id: 'pwrOn',
+						id: 'state',
 						default: '1',
 						choices: [
 							{ id: '0', label: 'Off' },
@@ -405,7 +409,7 @@ class DNRInstance extends InstanceBase {
 					},
 				],
 				callback: function (feedback, context) {
-					return this.powerOn == feedback.options.pwrOn
+					return self.powerOn == ('1' == feedback.options.state)
 				},
 			},
 		})

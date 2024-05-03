@@ -42,6 +42,10 @@ class DNRInstance extends InstanceBase {
 	// When module gets deleted
 	async destroy() {
 		if (this.socket !== undefined) {
+			if (this.socket.isConnected()) {
+				this.socket.end()
+			}
+
 			this.socket.destroy()
 		}
 		if (this.heartbeat) {
@@ -65,6 +69,9 @@ class DNRInstance extends InstanceBase {
 		let self = this
 
 		if (this.socket !== undefined) {
+			if (this.socket.isConnected()) {
+				this.socket.end()
+			}
 			this.socket.destroy()
 			delete this.socket
 		}
@@ -120,7 +127,7 @@ class DNRInstance extends InstanceBase {
 				while (ack < chunk.byteLength && chunk.readInt8(ack) == 6) {
 					ack++
 				}
-				let resp = chunk.toString(undefined, ack+2).slice(0, -1)
+				let resp = chunk.toString(undefined, ack + 2).slice(0, -1)
 				let isPower = false
 
 				if (self.devMode) {
@@ -182,7 +189,6 @@ class DNRInstance extends InstanceBase {
 
 	// Return config fields for web config
 	getConfigFields() {
-
 		return [
 			{
 				type: 'textinput',

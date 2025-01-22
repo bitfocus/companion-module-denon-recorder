@@ -22,3 +22,6 @@ The rs232 only models (DN-500R, DN-F450R, DN-F650R) require an Ethernet to RS232
 
 **V2.0.0** istnv
 * Refactor for Companion V3.0
+
+**V2.3.1** dewiweb
+* Add "Add Mark" action

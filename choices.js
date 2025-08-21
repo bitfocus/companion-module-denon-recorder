@@ -107,6 +107,10 @@ export const RECORD_ACTIONS = [
 		id: 'OR01',
 		label: 'One Touch Rec Off',
 	},
+	{
+		id: '23121',
+		label: 'Add Mark',
+	}
 ]
 
 export const RECORD_MONITOR = [

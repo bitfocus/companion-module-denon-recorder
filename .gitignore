@@ -1,5 +1,6 @@
 node_modules/
 .eslintrc
+.yarn
 /pkg
 /pkg.tgz
 DEBUG-INSPECT

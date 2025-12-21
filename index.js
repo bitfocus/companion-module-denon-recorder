@@ -2,6 +2,9 @@
 import { combineRgb, Regex, TCPHelper } from '@companion-module/base'
 import { runEntrypoint, InstanceBase, InstanceStatus } from '@companion-module/base'
 import { compileActionDefinitions } from './actions.js'
+import { compileVariableDefinitions } from './variables.js'
+import { compileFeedbackDefinitions } from './feedback.js'
+import { STATUS } from './responses.js'
 import { UpgradeScripts } from './upgrades.js'
 
 import * as CHOICES from './choices.js'
@@ -15,6 +18,30 @@ class DNRInstance extends InstanceBase {
 
 		this.powerOn = false
 		this.transState = this.TRANS_OFF
+		this.ACK = 6
+		this.NAK = 15
+		this.POLL_COUNT = 1
+		this.POLL_TIMEOUT = 1000
+
+		this.waiting = false
+		this.needStats = true
+	}
+
+	async sendCommand(cmd, req = false) {
+		if (this.devMode && !this.needStats) {
+			console.log('Send: @0' + cmd)
+			this.log('debug', `sending '@0${cmd}' to ${this.config.host}`)
+		}
+
+		if (this.socket !== undefined && this.socket.isConnected) {
+			this.socket.send('@0' + cmd + '\r')
+			// request info if command not issue a response
+			if (req && !this.needStats) {
+				this.pulse()
+			}
+		} else {
+			this.log('error', 'Not connected :(')
+		}
 	}
 
 	async init(config) {
@@ -23,7 +50,8 @@ class DNRInstance extends InstanceBase {
 
 		this.init_actions() // export actions
 		this.init_presets()
-		this.init_feedbacks()
+		this.init_variables()
+		//this.init_feedbacks()
 		this.init_tcp()
 	}
 
@@ -32,7 +60,10 @@ class DNRInstance extends InstanceBase {
 
 		this.config = config
 
+		this.init_actions() // export actions
 		this.init_presets()
+		this.init_variables()
+		//this.init_feedbacks()
 
 		if (resetConnection === true || this.socket === undefined) {
 			this.init_tcp()
@@ -42,7 +73,7 @@ class DNRInstance extends InstanceBase {
 	// When module gets deleted
 	async destroy() {
 		if (this.socket !== undefined) {
-			if (this.socket.isConnected()) {
+			if (this.socket.isConnected) {
 				this.socket.end()
 			}
 
@@ -58,18 +89,67 @@ class DNRInstance extends InstanceBase {
 		this.setActionDefinitions(compileActionDefinitions(this))
 	}
 
+	init_variables() {
+		this.vStat = {}
+		this.setVariableDefinitions(compileVariableDefinitions(this))
+	}
+
 	/**
 	 * heartbeat to request updates, device gets bored after 5 minutes
 	 */
 	pulse() {
-		this.socket.send('@0?PW\r')
+		this.pollCount++
+		// any leftover status needed?
+		if (this.needStats) {
+			this.pollStats()
+		} else if (this.pollCount % 200 == 0) {
+			this.sendCommand('?PW')
+		}
+	}
+
+	pollStats() {
+		let stillNeed = 0
+		let counter = 0
+		let timeNow = Date.now()
+		let timeOut = timeNow - this.POLL_TIMEOUT
+
+		for (const id in this.vStat) {
+			if (!this.vStat[id].valid) {
+				stillNeed++
+				if (this.vStat[id].polled < timeOut) {
+					this.sendCommand(`?${id}`, true)
+					this.vStat[id].polled = timeNow
+					counter++
+					// only allow 'POLL_COUNT' queries during one cycle
+					if (counter > this.POLL_COUNT) {
+						break
+					}
+				}
+			}
+		}
+
+		if (this.needStats && 0 == stillNeed) {
+			this.updateStatus(InstanceStatus.Ok, 'Recorder status loaded')
+			const c = Object.keys(this.vStat).length
+			const d = (c / ((timeNow - this.timeStart) / 1000)).toFixed(1)
+			this.log('info', `Status Sync complete (${c}@${d})`)
+			this.needStats = false
+		}
+	}
+
+	firstPoll() {
+		this.needStats = true
+		this.pollCount = 0
+		this.timeStart = Date.now()
+		this.pollStats()
+		this.pulse()
 	}
 
 	init_tcp() {
 		let self = this
 
 		if (this.socket !== undefined) {
-			if (this.socket.isConnected()) {
+			if (this.socket.isConnected) {
 				this.socket.end()
 			}
 			this.socket.destroy()
@@ -85,105 +165,165 @@ class DNRInstance extends InstanceBase {
 
 		if (this.config.host && this.config.port) {
 			this.socket = new TCPHelper(this.config.host, this.config.port)
+			this.connected = false
 
-			this.socket.on('end', function () {
-				self.updateStatus(InstanceStatus.Disconnected, 'Closed')
-				self.log('info', 'Connection Closed')
-				if (self.heartbeat) {
-					clearInterval(self.heartbeat)
-					delete self.heartbeat
-				}
-				self.hasError = true
-			})
-
-			this.socket.on('error', function (err) {
+			this.socket.on('end', () => {
+				this.updateStatus(InstanceStatus.Disconnected, 'Closed')
+				this.log('info', 'Connection Closed')
 				if (this.heartbeat) {
-					clearInterval(self.heartbeat)
-					delete self.heartbeat
+					clearInterval(this.heartbeat)
+					delete this.heartbeat
 				}
-				if (!self.hasError) {
-					self.log('debug', `Network error ${err}`)
-					self.updateStatus(InstanceStatus.UnknownError, err.message)
-					self.log('error', 'Network error: ' + err.message)
-					self.hasError = true
+				this.hasError = true
+				this.connected = false
+			})
+
+			this.socket.on('error', (err) => {
+				if (this.heartbeat) {
+					clearInterval(this.heartbeat)
+					delete this.heartbeat
+				}
+				if (!this.hasError) {
+					this.log('debug', `Network error ${err}`)
+					this.updateStatus(InstanceStatus.UnknownError, err.message)
+					this.log('error', 'Network error: ' + err.message)
+					this.hasError = true
 				}
 			})
 
-			this.socket.on('connect', function () {
-				self.updateStatus(InstanceStatus.Ok)
-				self.heartbeat = setInterval(function () {
-					self.pulse()
-				}, 60000)
-				self.hasError = false
-				self.log('debug', 'Connected')
-				if (self.devMode) {
-					console.log('Sending @0?PW')
-				}
-				self.socket.send('@0?PW\r')
+			this.socket.on('connect', () => {
+				this.updateStatus(InstanceStatus.Connecting, 'Loading Recorder status')
+
+				this.firstPoll()
+				this.heartbeat = setInterval(() => {
+					this.pulse()
+				}, 25)
+				this.hasError = false
 			})
 
-			this.socket.on('data', function (chunk) {
-				let ack = 0
-				while (ack < chunk.byteLength && chunk.readInt8(ack) == 6) {
-					ack++
+			this.socket.on('data', (chunk) => {
+				let ackAt = 0
+				let ackStat = 0
+
+				if (!this.connected) {
+					this.connected = true
+					this.log('debug', 'Connecting')
+					this.updateStatus(InstanceStatus.Connecting, 'Loading device data')
 				}
-				let resp = chunk.toString(undefined, ack + 2).slice(0, -1)
+
+				while (ackAt < chunk.byteLength && [this.ACK, this.NAK].includes(chunk.readInt8(ackAt))) {
+					ackAt++
+				}
+				switch (chunk.readInt8(0)) {
+					case this.ACK:
+						ackStat = 1
+						break
+					case this.NAK:
+						ackStat = 2
+						break
+					default:
+						ackStat = 0
+				}
+
+				let resp = chunk.toString(undefined, ackAt + 2).slice(0, -1)
 				let isPower = false
 
-				if (self.devMode) {
-					self.log('debug', `Received ${chunk.length} bytes of data. ${chunk}`)
+				if (this.devMode && !this.needStats) {
+					this.log('debug', `Received ${chunk.length} bytes of data. ${chunk}`)
 					// response or auto-status?
-					self.log('debug', 'Starts with ACK: ', ack)
+					if (ackStat > 0) {
+						this.log('debug', `Response ${ackStat == 1 ? 'ACK' : 'NAK'}`)
+					} else {
+						this.log('debug', 'Auto-stat')
+					}
 					// status request response
-					self.log('debug', "Response is: '" + resp + "'")
+					this.log('debug', "Data is: '" + resp + "'") /*  */
 
-					console.log('Received ' + chunk.length + ' bytes of data.', chunk)
-					console.log('Starts with ACK: ', ack)
-					console.log("Response is: '" + resp + "'")
+					console.log('Received ' + chunk.length + ' bytes of data.', chunk.toString())
+					if (ackStat > 0) {
+						console.log(`Starts with ${ackStat == 1 ? 'ACK' : 'NAK'}`)
+					} else {
+						console.log('Auto-stat')
+					}
 				}
-				switch (resp) {
-					case 'PW00':
-					case 'PW01':
-					case 'PW02':
-						self.powerOn = 'PW00' == resp
-						if (self.powerOn) {
-							isPower = true
-							if (self.devMode) {
-								console.log('Sending @0?ST')
-							}
-							self.socket.send('@0?ST\r')
-						} else {
-							resp = 'STOF'
-						}
-						self.checkFeedbacks('power')
-						break
-					case 'STAB':
-						resp = 'STPL'
-						break
-					case 'STPR':
-						resp = 'STPP'
-						break
-					case 'STCE':
-						resp = 'STOF'
-						break
-					case 'STRE':
-					case 'STRP':
-					case 'STPL':
-					case 'STPP':
-					case 'STST':
-						break
-					default: // something we don't track
-						resp = ''
+
+				if (resp != '') {
+					this.processReply(resp)
 				}
-				if (!isPower && '' != resp) {
-					self.transState = resp
-					self.checkFeedbacks('transport')
-				}
+
 				// no ack means status update from unit, respond with ACK
-				if (!ack) {
-					self.socket.send(String.fromCharCode(6))
+				if (!ackStat) {
+					this.socket.send(String.fromCharCode(this.ACK))
 				}
 			})
+		}
+	}
+
+	processReply(resp) {
+		let cmd = resp.slice(0, 2)
+		let subLen = STATUS[cmd]?.subLen || 0
+		const lr = STATUS[cmd]?.hasLR ? 3 : 2
+		let val = subLen == 0 ? resp.slice(lr) : resp.slice(lr, lr + subLen)
+		let vName = STATUS[cmd]?.varName
+		const subVal = subLen == 0 ? '' : resp.slice(lr + subLen)
+		const vDesc = STATUS[cmd]?.opt[val]?.desc || val
+		const vPlus = STATUS[cmd]?.opt[val]?.sub[subVal] || ''
+		let isPower = false
+
+		if (STATUS[cmd] != undefined) {
+			let varUpdate = []
+
+			if (STATUS[cmd].hasLR) {
+				cmd = resp.slice(0, 3)
+				val = resp.slice(3)
+				vName = vName + '_' + cmd.slice(-1).toLowerCase()
+			}
+			this.vStat[cmd].valid = true
+			// if (subLen > 0) {
+			// 	val = vDesc
+			// }
+
+			varUpdate[vName] = vDesc + subVal || ''
+
+			this.setVariableValues(varUpdate)
+		}
+
+		switch (cmd) {
+		}
+		switch (resp) {
+			case 'PW00':
+			case 'PW01':
+			case 'PW02':
+				this.powerOn = 'PW00' == resp
+				if (this.powerOn) {
+					isPower = true
+					this.sendCommand('?ST')
+				} else {
+					resp = 'STOF'
+				}
+				this.checkFeedbacks('power')
+				break
+			case 'STAB':
+				resp = 'STPL'
+				break
+			case 'STPR':
+				resp = 'STPP'
+				break
+			case 'STCE':
+				resp = 'STOF'
+				break
+			case 'STRE':
+			case 'STRP':
+			case 'STPL':
+			case 'STPP':
+			case 'STST':
+				break
+			default: // something we don't track
+				resp = ''
+		}
+		if (!isPower && '' != resp) {
+			this.transState = resp
+			this.checkFeedbacks('transport')
 		}
 	}
 
@@ -353,72 +493,6 @@ class DNRInstance extends InstanceBase {
 		}
 
 		this.setPresetDefinitions(presets)
-	}
-
-	init_feedbacks() {
-		let self = this
-		this.setFeedbackDefinitions({
-			transport: {
-				type: 'advanced',
-				name: 'Color for Transport Mode',
-				description: 'Set Button colors for Off, Play, Pause,\nRec Pause, Recording',
-				options: [
-					{
-						type: 'colorpicker',
-						label: 'Foreground color',
-						id: 'fg',
-						default: '16777215',
-					},
-					{
-						type: 'colorpicker',
-						label: 'Background color',
-						id: 'bg',
-						default: combineRgb(32, 32, 32),
-					},
-					{
-						type: 'dropdown',
-						label: 'Which Mode?',
-						id: 'type',
-						default: 'STOF',
-						choices: CHOICES.TRANSPORT,
-					},
-				],
-				callback: function (feedback, context) {
-					let ret = {}
-					let options = feedback.options
-					let type = options.type
-
-					if (type == self.transState) {
-						ret = { color: options.fg, bgcolor: options.bg }
-					}
-					return ret
-				},
-			},
-			power: {
-				type: 'boolean',
-				name: 'Power Status',
-				description: 'Indicate Power State on Button',
-				defaultStyle: {
-					bgcolor: combineRgb(32, 32, 32),
-					color: combineRgb(255, 255, 255),
-				},
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Status?',
-						id: 'state',
-						default: '1',
-						choices: [
-							{ id: '0', label: 'Off' },
-							{ id: '1', label: 'On' },
-						],
-					},
-				],
-				callback: function (feedback, context) {
-					return self.powerOn == ('1' == feedback.options.state)
-				},
-			},
-		})
 	}
 }
 

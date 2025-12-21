@@ -2,23 +2,6 @@ import { Regex } from '@companion-module/base'
 import * as CHOICES from './choices.js'
 
 export function compileActionDefinitions(self) {
-	const sendCommand = async (action, cmd, req = false) => {
-		if (self.devMode) {
-			console.log('Send: @0' + cmd)
-			self.log('debug', `sending '@0${cmd}' to ${self.config.host}`)
-		}
-
-		if (self.socket !== undefined && self.socket.isConnected) {
-			self.socket.send('@0' + cmd + '\r')
-			// request info if command not issue a response
-			if (req) {
-				self.pulse()
-			}
-		} else {
-			self.log('error', 'Socket not connected :(')
-		}
-	}
-
 	function pad0(num, len = 2) {
 		return ('0'.repeat(len) + num).slice(-len)
 	}
@@ -36,7 +19,7 @@ export function compileActionDefinitions(self) {
 				},
 			],
 			callback: async (action, context) => {
-				await sendCommand(action, action.options.sel_cmd, true)
+				await self.sendCommand(action.options.sel_cmd, true)
 			},
 		},
 		record: {
@@ -57,7 +40,7 @@ export function compileActionDefinitions(self) {
 				},
 			],
 			callback: async (action, context) => {
-				await sendCommand(action, action.options.sel_cmd)
+				await self.sendCommand(action.options.sel_cmd)
 			},
 		},
 		track_playback: {
@@ -79,7 +62,7 @@ export function compileActionDefinitions(self) {
 				},
 			],
 			callback: async (action, context) => {
-				await sendCommand(action, action.options.sel_cmd)
+				await self.sendCommand(action.options.sel_cmd)
 			},
 		},
 		track_selection: {
@@ -116,7 +99,7 @@ export function compileActionDefinitions(self) {
 				if (action.options.sel_cmd == 'Tr') {
 					cmd += pad0(action.options.sel_val, 4)
 				}
-				await sendCommand(action, cmd)
+				await self.sendCommand(cmd)
 			},
 		},
 		panel_lock: {
@@ -131,7 +114,7 @@ export function compileActionDefinitions(self) {
 				},
 			],
 			callback: async (action, context) => {
-				await sendCommand(action, action.options.sel_cmd)
+				await self.sendCommand(action.options.sel_cmd)
 			},
 		},
 		format: {
@@ -143,10 +126,24 @@ export function compileActionDefinitions(self) {
 					label: 'Warning!',
 					width: 12,
 					value: 'This will ERASE the currently selected\nRecord Media!! ',
-				}
+				},
 			],
-		callback: async (action, context) => {
-				await sendCommand(action, '23FOMAT')
+			callback: async (action, context) => {
+				await self.sendCommand('23FOMAT')
+			},
+		},
+		custom: {
+			name: 'Custom command',
+			options: [
+				{
+					type: 'textinput',
+					id: 'cmd',
+					label: 'Command',
+					default: '',
+				},
+			],
+			callback: async (action, context) => {
+				await self.sendCommand(action.options.cmd)
 			},
 		},
 	}

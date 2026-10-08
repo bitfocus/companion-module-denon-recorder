@@ -1,4 +1,6 @@
-// unit comands and responses
+// unit commands and responses
+
+import { formatHMS, formatMS } from './format.js'
 
 export const STATUS = {
 	MM: {
@@ -221,7 +223,7 @@ export const STATUS = {
 	},
 	RT: {
 		varName: 'rec_remain',
-		varName: 'Remaining Record Time',
+		varDesc: 'Remaining Record Time',
 		isRequest: true,
 		subLen: 0,
 		hasLR: false,
@@ -317,7 +319,7 @@ export const STATUS = {
 	AR: {
 		varName: 'archive',
 		varDesc: 'Archive Mode',
-		isRequest: 0,
+		isRequest: false,
 		subLen: 0,
 		hasLR: false,
 		opt: {
@@ -356,7 +358,7 @@ export const STATUS = {
 		varName: 'rec_channel',
 		varDesc: 'Record Which Channel',
 		isRequest: true,
-		sublen: 0,
+		subLen: 0,
 		hasLR: false,
 		opt: {
 			ST: { desc: 'Stereo', sub: {} },
@@ -502,6 +504,7 @@ export const STATUS = {
 		subLen: 0,
 		hasLR: false,
 		opt: {},
+		format: formatMS,
 	},
 	ET: {
 		varName: 'track_et',
@@ -510,6 +513,7 @@ export const STATUS = {
 		subLen: 0,
 		hasLR: false,
 		opt: {},
+		format: formatHMS,
 	},
 	RM: {
 		varName: 'track_rt',
@@ -518,6 +522,7 @@ export const STATUS = {
 		subLen: 0,
 		hasLR: false,
 		opt: {},
+		format: formatHMS,
 	},
 	FR: {
 		varName: 'file_sort',
@@ -576,7 +581,7 @@ export const STATUS = {
 	},
 	RE: {
 		varName: 'pb_repeat',
-		varDesc: 'Playback Random',
+		varDesc: 'Playback Repeat',
 		isRequest: true,
 		subLen: 0,
 		hasLR: false,

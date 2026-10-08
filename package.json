@@ -1,20 +1,28 @@
 {
 	"name": "denon-recorder",
-	"version": "3.0.0-alpha1",
+	"version": "3.0.1",
 	"main": "index.js",
 	"type": "module",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"format": "prettier -w .",
+		"package": "companion-module-build",
+		"check": "companion-module-check",
+		"test": "node --test"
+	},
+	"engines": {
+		"node": "^22.20"
 	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-denon-recorder.git"
 	},
 	"license": "MIT",
+	"prettier": "@companion-module/tools/.prettierrc.json",
 	"devDependencies": {
-		"@companion-module/tools": "^2.8.0"
+		"@companion-module/tools": "^2.8.0",
+		"prettier": "^3"
 	},
 	"dependencies": {
-		"@companion-module/base": "^1.8.0"
+		"@companion-module/base": "~1.14.1"
 	}
 }

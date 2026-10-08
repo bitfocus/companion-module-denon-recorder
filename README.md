@@ -62,3 +62,15 @@ The rs232 only models (DN-500R, DN-F450R, DN-F650R) require an Ethernet to RS232
 
 * Add variables for recorder status data
 * Add feedbacks for more status conditions
+
+## **V3.0.1**
+
+* Fix variables: every recorder status value now has a variable (previously only some were defined)
+* Add `transport` variable and formatted `track_et_fmt`, `track_rt_fmt`, `track_len_fmt` time variables
+* Re-enable feedbacks (transport, power) and add Selected Media and Recording Input feedbacks
+* Convert transport feedback to a boolean feedback (existing buttons are upgraded automatically)
+* Add actions for media selection, record input/channels, record monitor/input volume and recording format
+* Periodically refresh transport state (default every 2 s); track and time polling is optional
+* Handle replies that are split across, or combined in, network packets
+* Presets now show feedback, plus new status display presets
+* Update to Node 22 runtime and current module tooling

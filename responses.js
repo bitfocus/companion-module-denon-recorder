@@ -376,6 +376,7 @@ export const STATUS = {
 			PM: {
 				desc: 'PCM',
 				sub: {
+					16: '16 bit',
 					24: '24 bit',
 					32: '32 bit',
 				},
@@ -481,6 +482,7 @@ export const STATUS = {
 			PM: {
 				desc: 'PCM',
 				sub: {
+					16: '16 bit',
 					24: '24 bit',
 					32: '32 bit',
 				},

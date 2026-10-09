@@ -70,3 +70,10 @@ test('formats time values', () => {
 test('ignores unknown replies', () => {
 	assert.equal(parseStatus('ZZ01'), undefined)
 })
+
+test('decodes every PCM bit depth the format action can set', () => {
+	assert.equal(parseStatus('AFPM16').value, 'PCM 16 bit')
+	assert.equal(parseStatus('AFPM24').value, 'PCM 24 bit')
+	assert.equal(parseStatus('afPM16').value, 'PCM 16 bit')
+	assert.equal(parseStatus('AFPM32').value, 'PCM 32 bit')
+})

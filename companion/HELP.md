@@ -79,15 +79,50 @@ The older RS232 only models (DN-500R, DN-F450R, DN-F650R) can be controlled with
 * Panel Unlock
 * Transport Lock
 
-**Presets Included:**
+### Other
 
-* Presets for most commands
+* Format current media (erases it!)
+* Custom command (sent as `@0<command>`)
 
-**Feedback Included:**
+## Configuration
 
-* Playing / Paused
-* Recording / Paused
-* Power On / Off
+* **Target IP / Port**: address of the recorder (port 23 by default)
+* **Transport poll interval**: how often the transport state is re-read from the recorder (default 2000 ms, minimum 500 ms). Set to 0 to only refresh after commands and when the recorder reports a change.
+* **Also poll track and time values**: off by default. When on, track number, elapsed/remaining time and remaining record time are refreshed on each poll as well.
+
+## Presets
+
+* Buttons for most commands, with feedback for transport, power, media and input
+* Status display buttons (transport, track, elapsed/remaining time, record time left, media)
+
+## Feedbacks
+
+* Transport State (Off / Stopped / Playing / Paused / Record Pause / Recording)
+* Power Status (On / Off)
+* Selected Media (SD1 / SD2 / USB / Network)
+* Recording Input (RCA / XLR / Coax / AES)
+
+## Variables
+
+All status values reported by the recorder are available as variables. Commonly used ones:
+
+| Variable | Description |
+| --- | --- |
+| `transport` | Transport state (Playing, Recording, ...) |
+| `status` | Detailed device status |
+| `power` | Power status |
+| `media` | Selected media |
+| `track_cur` / `track_tot` | Current track / total tracks |
+| `track_et` / `track_et_fmt` | Track elapsed time (raw / H:MM:SS) |
+| `track_rt` / `track_rt_fmt` | Track remaining time (raw / H:MM:SS) |
+| `track_len` / `track_len_fmt` | Track length (raw / M:SS) |
+| `rec_remain` | Remaining record time |
+| `rec_input`, `rec_fmt`, `rec_rate`, `rec_channel` | Recording settings |
+| `title`, `artist`, `album` | Track metadata |
+| `folder_name` | Current folder |
+| `dev_name` | Device name |
+
+Settings such as input/output adjust, phantom power and mic sensitivity have `_l` and `_r` variables for each channel.
 
 Thanks and appreciation to Brian Singerman for sponsoring the recent updates for feedback and variable support.<br>
 Also, thanks and appreciation to Kevin Haddock for sponsoring the initial work on this module.

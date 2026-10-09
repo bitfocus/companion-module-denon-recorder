@@ -110,7 +110,7 @@ export const RECORD_ACTIONS = [
 	{
 		id: '23121',
 		label: 'Add Mark',
-	}
+	},
 ]
 
 export const RECORD_MONITOR = [

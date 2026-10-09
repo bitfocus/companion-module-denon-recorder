@@ -1,46 +1,65 @@
-/* eslint-disable no-useless-escape */
-import { combineRgb, Regex, TCPHelper } from '@companion-module/base'
-import { runEntrypoint, InstanceBase, InstanceStatus } from '@companion-module/base'
+import { combineRgb, Regex, TCPHelper, runEntrypoint, InstanceBase, InstanceStatus } from '@companion-module/base'
 import { compileActionDefinitions } from './actions.js'
 import { compileVariableDefinitions } from './variables.js'
 import { compileFeedbackDefinitions } from './feedback.js'
-import { STATUS } from './responses.js'
+import { ACK, createLineParser, parseStatus } from './protocol.js'
 import { UpgradeScripts } from './upgrades.js'
 
 import * as CHOICES from './choices.js'
 
+// how often the send queue is serviced
+const PULSE_MS = 25
+// keep-alive, device gets bored after 5 minutes
+const KEEPALIVE_MS = 5000
+// transport state is always re-read periodically (unless polling is disabled)
+const TRANSPORT_STATUS = ['ST']
+// optional: track and time values, only re-read when enabled in the config
+const TRACK_STATUS = ['Tr', 'Tt', 'ET', 'RM', 'tl', 'RT', 'MM']
+// never poll faster than this, to avoid flooding the recorder
+const MIN_POLL_MS = 500
+const DEFAULT_POLL_MS = 2000
+
+const TRANSPORT_LABELS = Object.fromEntries(CHOICES.TRANSPORT.map((t) => [t.id, t.label]))
+
 class DNRInstance extends InstanceBase {
 	constructor(internal) {
-		// super-constructor
 		super(internal)
 
 		this.devMode = process.env.DEVELOPER
 
 		this.powerOn = false
-		this.transState = this.TRANS_OFF
-		this.ACK = 6
-		this.NAK = 15
+		this.transState = 'STOF'
 		this.POLL_COUNT = 1
 		this.POLL_TIMEOUT = 1000
 
-		this.waiting = false
 		this.needStats = true
+		this.vStat = {}
+		this.rawStat = {}
+		this.queryQueue = []
 	}
 
-	async sendCommand(cmd, req = false) {
-		if (this.devMode && !this.needStats) {
-			console.log('Send: @0' + cmd)
+	/**
+	 * @param {string} cmd - command without the '@0' prefix
+	 * @param {string[]} refresh - status values to re-read after the command
+	 */
+	async sendCommand(cmd, refresh = []) {
+		if (this.devMode) {
 			this.log('debug', `sending '@0${cmd}' to ${this.config.host}`)
 		}
 
 		if (this.socket !== undefined && this.socket.isConnected) {
 			this.socket.send('@0' + cmd + '\r')
-			// request info if command not issue a response
-			if (req && !this.needStats) {
-				this.pulse()
+			for (const id of refresh) {
+				this.queueQuery(id)
 			}
 		} else {
 			this.log('error', 'Not connected :(')
+		}
+	}
+
+	queueQuery(id) {
+		if (!this.queryQueue.includes(id)) {
+			this.queryQueue.push(id)
 		}
 	}
 
@@ -48,40 +67,30 @@ class DNRInstance extends InstanceBase {
 		this.hasError = false
 		this.config = config
 
-		this.init_actions() // export actions
-		this.init_presets()
+		this.init_actions()
 		this.init_variables()
-		//this.init_feedbacks()
+		this.init_feedbacks()
+		this.init_presets()
 		this.init_tcp()
 	}
 
 	async configUpdated(config) {
-		let resetConnection = this.config.host != config.host || this.config.port != config.port
+		const resetConnection = this.config.host != config.host || this.config.port != config.port
 
 		this.config = config
 
-		this.init_actions() // export actions
-		this.init_presets()
-		this.init_variables()
-		//this.init_feedbacks()
-
 		if (resetConnection === true || this.socket === undefined) {
+			this.init_variables()
 			this.init_tcp()
 		}
 	}
 
 	// When module gets deleted
 	async destroy() {
+		this.stopHeartbeat()
 		if (this.socket !== undefined) {
-			if (this.socket.isConnected) {
-				this.socket.end()
-			}
-
 			this.socket.destroy()
-		}
-		if (this.heartbeat) {
-			clearInterval(this.heartbeat)
-			delete this.heartbeat
+			delete this.socket
 		}
 	}
 
@@ -89,35 +98,71 @@ class DNRInstance extends InstanceBase {
 		this.setActionDefinitions(compileActionDefinitions(this))
 	}
 
-	init_variables() {
-		this.vStat = {}
-		this.setVariableDefinitions(compileVariableDefinitions(this))
+	init_feedbacks() {
+		this.setFeedbackDefinitions(compileFeedbackDefinitions(this))
 	}
 
-	/**
-	 * heartbeat to request updates, device gets bored after 5 minutes
-	 */
-	pulse() {
-		this.pollCount++
-		// any leftover status needed?
-		if (this.needStats) {
-			this.pollStats()
-		} else if (this.pollCount % 200 == 0) {
-			this.sendCommand('?PW')
+	init_variables() {
+		this.vStat = {}
+		this.rawStat = {}
+		this.setVariableDefinitions(compileVariableDefinitions(this))
+		this.setVariableValues({ transport: TRANSPORT_LABELS[this.transState] })
+	}
+
+	stopHeartbeat() {
+		if (this.heartbeat) {
+			clearInterval(this.heartbeat)
+			delete this.heartbeat
 		}
 	}
 
+	/**
+	 * Called every PULSE_MS: sends at most one query so the recorder isn't flooded
+	 */
+	pulse() {
+		const now = Date.now()
+
+		if (this.needStats) {
+			this.pollStats()
+			return
+		}
+
+		// connections created before this option existed won't have it set
+		const interval = Number(this.config.poll_interval ?? DEFAULT_POLL_MS) || 0
+		if (interval > 0 && now - this.lastLivePoll >= Math.max(interval, MIN_POLL_MS)) {
+			this.lastLivePoll = now
+			if (this.powerOn) {
+				TRANSPORT_STATUS.forEach((id) => this.queueQuery(id))
+				if (this.config.poll_track) {
+					TRACK_STATUS.forEach((id) => this.queueQuery(id))
+				}
+			}
+		}
+
+		if (now - this.lastKeepalive >= KEEPALIVE_MS) {
+			this.lastKeepalive = now
+			this.queueQuery('PW')
+		}
+
+		if (this.queryQueue.length) {
+			this.sendCommand('?' + this.queryQueue.shift())
+		}
+	}
+
+	/**
+	 * Initial load of every status value the recorder will answer
+	 */
 	pollStats() {
 		let stillNeed = 0
 		let counter = 0
-		let timeNow = Date.now()
-		let timeOut = timeNow - this.POLL_TIMEOUT
+		const timeNow = Date.now()
+		const timeOut = timeNow - this.POLL_TIMEOUT
 
 		for (const id in this.vStat) {
 			if (!this.vStat[id].valid) {
 				stillNeed++
 				if (this.vStat[id].polled < timeOut) {
-					this.sendCommand(`?${id}`, true)
+					this.sendCommand(`?${id}`)
 					this.vStat[id].polled = timeNow
 					counter++
 					// only allow 'POLL_COUNT' queries during one cycle
@@ -132,197 +177,133 @@ class DNRInstance extends InstanceBase {
 			this.updateStatus(InstanceStatus.Ok, 'Recorder status loaded')
 			const c = Object.keys(this.vStat).length
 			const d = (c / ((timeNow - this.timeStart) / 1000)).toFixed(1)
-			this.log('info', `Status Sync complete (${c}@${d})`)
+			this.log('info', `Status Sync complete (${c}@${d}/s)`)
 			this.needStats = false
 		}
 	}
 
 	firstPoll() {
 		this.needStats = true
-		this.pollCount = 0
+		this.queryQueue = []
 		this.timeStart = Date.now()
+		this.lastLivePoll = this.timeStart
+		this.lastKeepalive = this.timeStart
+		for (const id in this.vStat) {
+			this.vStat[id].polled = 0
+		}
 		this.pollStats()
-		this.pulse()
 	}
 
 	init_tcp() {
-		let self = this
-
 		if (this.socket !== undefined) {
-			if (this.socket.isConnected) {
-				this.socket.end()
-			}
 			this.socket.destroy()
 			delete this.socket
 		}
 
-		if (this.heartbeat) {
-			clearInterval(this.heartbeat)
-			delete this.heartbeat
+		this.stopHeartbeat()
+
+		if (!this.config.host || !this.config.port) {
+			this.updateStatus(InstanceStatus.BadConfig, 'Missing host or port')
+			return
 		}
 
 		this.updateStatus(InstanceStatus.Connecting, 'Connecting')
 
-		if (this.config.host && this.config.port) {
-			this.socket = new TCPHelper(this.config.host, this.config.port)
-			this.connected = false
+		this.socket = new TCPHelper(this.config.host, this.config.port)
 
-			this.socket.on('end', () => {
-				this.updateStatus(InstanceStatus.Disconnected, 'Closed')
-				this.log('info', 'Connection Closed')
-				if (this.heartbeat) {
-					clearInterval(this.heartbeat)
-					delete this.heartbeat
-				}
+		this.socket.on('end', () => {
+			this.updateStatus(InstanceStatus.Disconnected, 'Closed')
+			this.log('info', 'Connection Closed')
+			this.stopHeartbeat()
+			this.hasError = true
+		})
+
+		this.socket.on('error', (err) => {
+			this.stopHeartbeat()
+			if (!this.hasError) {
+				this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+				this.log('error', 'Network error: ' + err.message)
 				this.hasError = true
-				this.connected = false
-			})
+			}
+		})
 
-			this.socket.on('error', (err) => {
-				if (this.heartbeat) {
-					clearInterval(this.heartbeat)
-					delete this.heartbeat
-				}
-				if (!this.hasError) {
-					this.log('debug', `Network error ${err}`)
-					this.updateStatus(InstanceStatus.UnknownError, err.message)
-					this.log('error', 'Network error: ' + err.message)
-					this.hasError = true
-				}
-			})
+		this.socket.on('connect', () => {
+			this.updateStatus(InstanceStatus.Connecting, 'Loading Recorder status')
+			this.hasError = false
+			this.stopHeartbeat()
+			this.firstPoll()
+			this.heartbeat = setInterval(() => this.pulse(), PULSE_MS)
+		})
 
-			this.socket.on('connect', () => {
-				this.updateStatus(InstanceStatus.Connecting, 'Loading Recorder status')
+		const parse = createLineParser((line, acked) => {
+			if (this.devMode) {
+				this.log('debug', `Received ${acked ? 'reply' : 'auto-status'} '${line}'`)
+			}
+			// no ack means status update from unit, respond with ACK
+			if (!acked) {
+				this.socket.send(String.fromCharCode(ACK))
+			}
+			this.processReply(line)
+		})
 
-				this.firstPoll()
-				this.heartbeat = setInterval(() => {
-					this.pulse()
-				}, 25)
-				this.hasError = false
-			})
-
-			this.socket.on('data', (chunk) => {
-				let ackAt = 0
-				let ackStat = 0
-
-				if (!this.connected) {
-					this.connected = true
-					this.log('debug', 'Connecting')
-					this.updateStatus(InstanceStatus.Connecting, 'Loading device data')
-				}
-
-				while (ackAt < chunk.byteLength && [this.ACK, this.NAK].includes(chunk.readInt8(ackAt))) {
-					ackAt++
-				}
-				switch (chunk.readInt8(0)) {
-					case this.ACK:
-						ackStat = 1
-						break
-					case this.NAK:
-						ackStat = 2
-						break
-					default:
-						ackStat = 0
-				}
-
-				let resp = chunk.toString(undefined, ackAt + 2).slice(0, -1)
-				let isPower = false
-
-				if (this.devMode && !this.needStats) {
-					this.log('debug', `Received ${chunk.length} bytes of data. ${chunk}`)
-					// response or auto-status?
-					if (ackStat > 0) {
-						this.log('debug', `Response ${ackStat == 1 ? 'ACK' : 'NAK'}`)
-					} else {
-						this.log('debug', 'Auto-stat')
-					}
-					// status request response
-					this.log('debug', "Data is: '" + resp + "'") /*  */
-
-					console.log('Received ' + chunk.length + ' bytes of data.', chunk.toString())
-					if (ackStat > 0) {
-						console.log(`Starts with ${ackStat == 1 ? 'ACK' : 'NAK'}`)
-					} else {
-						console.log('Auto-stat')
-					}
-				}
-
-				if (resp != '') {
-					this.processReply(resp)
-				}
-
-				// no ack means status update from unit, respond with ACK
-				if (!ackStat) {
-					this.socket.send(String.fromCharCode(this.ACK))
-				}
-			})
-		}
+		this.socket.on('data', parse)
 	}
 
 	processReply(resp) {
-		let cmd = resp.slice(0, 2)
-		let subLen = STATUS[cmd]?.subLen || 0
-		const lr = STATUS[cmd]?.hasLR ? 3 : 2
-		let val = subLen == 0 ? resp.slice(lr) : resp.slice(lr, lr + subLen)
-		let vName = STATUS[cmd]?.varName
-		const subVal = subLen == 0 ? '' : resp.slice(lr + subLen)
-		const vDesc = STATUS[cmd]?.opt[val]?.desc || val
-		const vPlus = STATUS[cmd]?.opt[val]?.sub[subVal] || ''
-		let isPower = false
+		const stat = parseStatus(resp)
 
-		if (STATUS[cmd] != undefined) {
-			let varUpdate = []
-
-			if (STATUS[cmd].hasLR) {
-				cmd = resp.slice(0, 3)
-				val = resp.slice(3)
-				vName = vName + '_' + cmd.slice(-1).toLowerCase()
+		if (stat) {
+			if (this.vStat[stat.key]) {
+				this.vStat[stat.key].valid = true
 			}
-			this.vStat[cmd].valid = true
-			// if (subLen > 0) {
-			// 	val = vDesc
-			// }
+			this.rawStat[stat.key] = stat.raw
 
-			varUpdate[vName] = vDesc + subVal || ''
+			const update = { [stat.varId]: stat.value }
+			if (stat.formatted !== undefined) {
+				update[stat.varId + '_fmt'] = stat.formatted
+			}
+			this.setVariableValues(update)
 
-			this.setVariableValues(varUpdate)
+			if (stat.cmd == 'MM') {
+				this.checkFeedbacks('media')
+			} else if (stat.cmd == 'IN') {
+				this.checkFeedbacks('rec_input')
+			}
 		}
 
-		switch (cmd) {
-		}
+		let trans = ''
 		switch (resp) {
 			case 'PW00':
 			case 'PW01':
 			case 'PW02':
 				this.powerOn = 'PW00' == resp
-				if (this.powerOn) {
-					isPower = true
-					this.sendCommand('?ST')
-				} else {
-					resp = 'STOF'
-				}
 				this.checkFeedbacks('power')
+				if (this.powerOn) {
+					this.queueQuery('ST')
+				} else {
+					trans = 'STOF'
+				}
 				break
 			case 'STAB':
-				resp = 'STPL'
+				trans = 'STPL'
 				break
 			case 'STPR':
-				resp = 'STPP'
+				trans = 'STPP'
 				break
 			case 'STCE':
-				resp = 'STOF'
+				trans = 'STOF'
 				break
 			case 'STRE':
 			case 'STRP':
 			case 'STPL':
 			case 'STPP':
 			case 'STST':
+				trans = resp
 				break
-			default: // something we don't track
-				resp = ''
 		}
-		if (!isPower && '' != resp) {
-			this.transState = resp
+		if (trans != '' && trans != this.transState) {
+			this.transState = trans
+			this.setVariableValues({ transport: TRANSPORT_LABELS[trans] })
 			this.checkFeedbacks('transport')
 		}
 	}
@@ -342,155 +323,122 @@ class DNRInstance extends InstanceBase {
 				id: 'port',
 				label: 'Target Port (Default: 23)',
 				width: 3,
-				default: 23,
+				default: '23',
 				regex: Regex.PORT,
+			},
+			{
+				type: 'number',
+				id: 'poll_interval',
+				label: 'Transport poll interval in ms (0 to disable)',
+				tooltip: 'How often the transport state is re-read from the recorder (minimum 500 ms)',
+				width: 4,
+				min: 0,
+				max: 60000,
+				default: DEFAULT_POLL_MS,
+			},
+			{
+				type: 'checkbox',
+				id: 'poll_track',
+				label: 'Also poll track and time values',
+				tooltip:
+					'Refresh track number, elapsed/remaining time and remaining record time on each poll (sends 7 extra queries per poll)',
+				width: 4,
+				default: false,
 			},
 		]
 	}
 
 	init_presets() {
 		const presets = {}
-		const pstSize = '14'
+		const white = combineRgb(255, 255, 255)
+		const black = combineRgb(0, 0, 0)
 
-		for (let input in CHOICES.POWER) {
-			presets[`power_${input}`] = {
-				type: 'button',
-				category: 'System',
-				name: CHOICES.POWER[input].label,
-				style: {
-					text: CHOICES.POWER[input].label,
-					size: pstSize,
-					color: '16777215',
-					bgcolor: 0,
+		const button = (category, label, actionId, cmd, feedbacks = []) => ({
+			type: 'button',
+			category,
+			name: label,
+			style: {
+				text: label,
+				size: '14',
+				color: white,
+				bgcolor: black,
+			},
+			steps: [
+				{
+					down: [{ actionId, options: { sel_cmd: cmd } }],
+					up: [],
 				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'power',
-								options: {
-									sel_cmd: CHOICES.POWER[input].id,
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
+			],
+			feedbacks,
+		})
+
+		const transportFb = (type, bgcolor) => [
+			{ feedbackId: 'transport', options: { type }, style: { color: white, bgcolor } },
+		]
+
+		// which transport state lights each preset
+		const LIT = {
+			'23PW': [
+				{ feedbackId: 'power', options: { state: '1' }, style: { color: white, bgcolor: combineRgb(0, 153, 0) } },
+			],
+			2312: [{ feedbackId: 'power', options: { state: '0' }, style: { color: white, bgcolor: combineRgb(153, 0, 0) } }],
+			2355: transportFb('STRE', combineRgb(204, 0, 0)),
+			'23Rp': transportFb('STRP', combineRgb(204, 102, 0)),
+			2353: transportFb('STPL', combineRgb(0, 153, 0)),
+			2348: transportFb('STPP', combineRgb(204, 153, 0)),
+			2354: transportFb('STST', combineRgb(80, 80, 80)),
+		}
+
+		const groups = [
+			['System', 'power', CHOICES.POWER],
+			['Recording', 'record', CHOICES.RECORD_ACTIONS],
+			['Track/Title', 'track_playback', CHOICES.TRACK_PLAYBACK],
+			['Track/Title', 'track_selection', CHOICES.TRACK_SELECTION.filter((c) => c.id != 'Tr')],
+			['Media', 'media_select', CHOICES.MEDIA_SELECT],
+			['Recording Setup', 'record_input', CHOICES.RECORD_INPUT],
+			['Recording Setup', 'record_monitor', CHOICES.RECORD_MONITOR],
+			['Recording Setup', 'record_format', CHOICES.RECORD_FORMAT],
+			['System', 'panel_lock', CHOICES.PANEL_LOCK],
+		]
+
+		for (const [category, actionId, choices] of groups) {
+			for (const c of choices) {
+				let feedbacks = LIT[c.id] || []
+				if (actionId == 'media_select') {
+					feedbacks = [
+						{
+							feedbackId: 'media',
+							options: { media: c.id.slice(2) },
+							style: { color: white, bgcolor: combineRgb(0, 0, 153) },
+						},
+					]
+				} else if (actionId == 'record_input' && c.id.startsWith('IN')) {
+					feedbacks = [
+						{
+							feedbackId: 'rec_input',
+							options: { input: c.id.slice(2) },
+							style: { color: white, bgcolor: combineRgb(0, 0, 153) },
+						},
+					]
+				}
+				presets[`${actionId}_${c.id}`] = button(category, c.label, actionId, c.id, feedbacks)
 			}
 		}
 
-		for (let input in CHOICES.RECORD_ACTIONS) {
-			presets[`rec_${input}`] = {
-				type: 'button',
-				category: 'Recording',
-				name: CHOICES.RECORD_ACTIONS[input].label,
-				style: {
-					text: CHOICES.RECORD_ACTIONS[input].label,
-					size: pstSize,
-					color: '16777215',
-					bgcolor: 0,
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'record',
-								options: {
-									sel_cmd: CHOICES.RECORD_ACTIONS[input].id,
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			}
-		}
-
-		for (let input in CHOICES.TRACK_PLAYBACK) {
-			presets[`pb_${input}`] = {
-				type: 'button',
-				category: 'Track/Title',
-				name: CHOICES.TRACK_PLAYBACK[input].label,
-				style: {
-					text: CHOICES.TRACK_PLAYBACK[input].label,
-					size: pstSize,
-					color: '16777215',
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'track_playback',
-								options: {
-									sel_cmd: CHOICES.TRACK_PLAYBACK[input].id,
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			}
-		}
-
-		for (let input in CHOICES.TRACK_SELECTION) {
-			presets[`sel_${input}`] = {
-				type: 'button',
-				category: 'Track/Title',
-				name: CHOICES.TRACK_SELECTION[input].label,
-				style: {
-					text: CHOICES.TRACK_SELECTION[input].label,
-					size: pstSize,
-					color: '16777215',
-					bgcolor: 0,
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'track_selection',
-								options: {
-									sel_cmd: CHOICES.TRACK_SELECTION[input].id,
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			}
-		}
-
-		for (let input in CHOICES.PANEL_LOCK) {
-			presets[`panel_${input}`] = {
-				type: 'button',
-				category: 'System',
-				name: CHOICES.PANEL_LOCK[input].label,
-				style: {
-					text: CHOICES.PANEL_LOCK[input].label,
-					size: 14,
-					color: '16777215',
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'panel_lock',
-								options: {
-									sel_cmd: CHOICES.PANEL_LOCK[input].id,
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			}
-		}
+		const status = (name, text) => ({
+			type: 'button',
+			category: 'Status',
+			name,
+			style: { text, size: '14', color: white, bgcolor: black },
+			steps: [{ down: [], up: [] }],
+			feedbacks: [],
+		})
+		presets.status_transport = status('Transport State', `$(${this.label}:transport)`)
+		presets.status_track = status('Current Track', `Track\n$(${this.label}:track_cur)/$(${this.label}:track_tot)`)
+		presets.status_elapsed = status('Track Elapsed', `Elapsed\n$(${this.label}:track_et_fmt)`)
+		presets.status_remain = status('Track Remaining', `Remain\n$(${this.label}:track_rt_fmt)`)
+		presets.status_rec_remain = status('Record Time Remaining', `Rec left\n$(${this.label}:rec_remain)`)
+		presets.status_media = status('Selected Media', `Media\n$(${this.label}:media)`)
 
 		this.setPresetDefinitions(presets)
 	}

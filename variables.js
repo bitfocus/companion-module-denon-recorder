@@ -1,27 +1,25 @@
 import { STATUS } from './responses.js'
 
 export function compileVariableDefinitions(self) {
-	let vars = []
+	const vars = [{ variableId: 'transport', name: 'Transport State' }]
 
-	for (let resp in STATUS) {
-		if (STATUS[resp].hasLR) {
-			;[
-				['l', 'Left'],
-				['r', 'Right'],
-			].forEach((lr) => {
-				self.vStat[resp + lr[0].toUpperCase()] = {
-					valid: !STATUS[resp]?.isRequest,
-					polled: 0,
-				}
-				vars.push({ variableId: STATUS[resp].varName + '_' + lr[0], name: STATUS[resp].varDesc + ' ' + lr[1] })
-			})
-		} else {
-			self.vStat[resp] = {
-				valid: !STATUS[resp]?.isRequest,
+	for (const resp in STATUS) {
+		const def = STATUS[resp]
+		const keys = def.hasLR
+			? [
+					[resp + 'L', '_l', ' Left'],
+					[resp + 'R', '_r', ' Right'],
+				]
+			: [[resp, '', '']]
+
+		for (const [key, idSuffix, nameSuffix] of keys) {
+			self.vStat[key] = {
+				valid: !def.isRequest,
 				polled: 0,
 			}
-			if (Object.keys(STATUS[resp].opt).length) {
-				vars.push({ variableId: STATUS[resp].varName, name: STATUS[resp].varDesc })
+			vars.push({ variableId: def.varName + idSuffix, name: def.varDesc + nameSuffix })
+			if (def.format) {
+				vars.push({ variableId: def.varName + idSuffix + '_fmt', name: def.varDesc + nameSuffix + ' (formatted)' })
 			}
 		}
 	}

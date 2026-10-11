@@ -79,3 +79,8 @@ The rs232 only models (DN-500R, DN-F450R, DN-F650R) require an Ethernet to RS232
 
 * Show 16-bit PCM correctly in the recording and track format variables
 * Releases are now built and published automatically on GitHub
+
+## Sharing status
+
+* Sent to the Bitfocus community project (version 3.0.2 improvements: transport status, variables, feedbacks, new actions, conservative polling, 16-bit PCM fix). Waiting on the maintainers.
+* Nothing church-specific is part of this module.

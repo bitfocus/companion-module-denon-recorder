@@ -1,0 +1,82 @@
+name: Build and publish release
+
+# Runs when the module's code changes on master (not for docs-only or dependency-only edits).
+# It builds the Companion module package (.tgz) and publishes it under "Releases".
+on:
+  push:
+    branches: [master]
+    paths:
+      - '*.js'
+      - 'package.json'
+      - 'companion/**'
+      - 'test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: yarn install --frozen-lockfile
+
+      - name: Run tests
+        run: yarn test
+
+      - name: Check the version number went up
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # highest version already published (empty if there is none yet)
+          LAST=$(gh release list --limit 200 --json tagName --jq '.[].tagName' | sed 's/^v//' | sort -V | tail -n 1)
+          echo "New version: $VERSION  Last published: ${LAST:-none}"
+
+          if [ -n "$LAST" ]; then
+            HIGHEST=$(printf '%s\n%s\n' "$LAST" "$VERSION" | sort -V | tail -n 1)
+            if [ "$VERSION" = "$LAST" ] || [ "$HIGHEST" != "$VERSION" ]; then
+              echo "::error::Version $VERSION is not higher than the last published version $LAST. Raise the version in package.json (for example to a higher last number) and try again."
+              exit 1
+            fi
+          fi
+
+      - name: Build the module package
+        run: yarn package
+
+      - name: Check the package is what Companion expects
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          FILE="denon-recorder-$VERSION.tgz"
+          test -f "$FILE" || { echo "::error::Expected $FILE was not built"; ls *.tgz; exit 1; }
+          PKG_VERSION=$(tar -xzOf "$FILE" pkg/companion/manifest.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::Version inside the package ($PKG_VERSION) does not match $VERSION"
+            exit 1
+          fi
+          tar -tzf "$FILE" | grep -q '^pkg/main.js$' || { echo "::error::Package is missing its main program file"; exit 1; }
+          echo "Package $FILE is OK (version $PKG_VERSION)"
+
+      - name: Publish the release
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          gh release create "v$VERSION" "denon-recorder-$VERSION.tgz" \
+            --target "$GITHUB_SHA" \
+            --title "Version $VERSION" \
+            --notes-file RELEASE_NOTES.md \
+            --latest

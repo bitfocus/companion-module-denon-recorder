@@ -1,57 +1,44 @@
-import { Regex } from '@companion-module/base'
+import { combineRgb } from '@companion-module/base'
+import { STATUS } from './responses.js'
 import * as CHOICES from './choices.js'
 
+function optChoices(cmd) {
+	return Object.entries(STATUS[cmd].opt).map(([id, opt]) => ({ id, label: opt.desc }))
+}
+
 export function compileFeedbackDefinitions(self) {
-	//init_feedbacks() {
-	const actionDefs = {
+	return {
 		transport: {
-			type: 'advanced',
-			name: 'Color for Transport Mode',
-			description: 'Set Button colors for Off, Play, Pause,\nRec Pause, Recording',
+			type: 'boolean',
+			name: 'Transport State',
+			description: 'Change button style when the transport is in the selected state',
+			defaultStyle: {
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(0, 153, 0),
+			},
 			options: [
 				{
-					type: 'colorpicker',
-					label: 'Foreground color',
-					id: 'fg',
-					default: '16777215',
-				},
-				{
-					type: 'colorpicker',
-					label: 'Background color',
-					id: 'bg',
-					default: combineRgb(32, 32, 32),
-				},
-				{
 					type: 'dropdown',
-					label: 'Which Mode?',
+					label: 'State',
 					id: 'type',
 					default: 'STOF',
 					choices: CHOICES.TRANSPORT,
 				},
 			],
-			callback: function (feedback, context) {
-				let ret = {}
-				let options = feedback.options
-				let type = options.type
-
-				if (type == self.transState) {
-					ret = { color: options.fg, bgcolor: options.bg }
-				}
-				return ret
-			},
+			callback: (feedback) => feedback.options.type == self.transState,
 		},
 		power: {
 			type: 'boolean',
 			name: 'Power Status',
 			description: 'Indicate Power State on Button',
 			defaultStyle: {
-				bgcolor: combineRgb(32, 32, 32),
+				bgcolor: combineRgb(0, 153, 0),
 				color: combineRgb(255, 255, 255),
 			},
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Status?',
+					label: 'Status',
 					id: 'state',
 					default: '1',
 					choices: [
@@ -60,10 +47,45 @@ export function compileFeedbackDefinitions(self) {
 					],
 				},
 			],
-			callback: function (feedback, context) {
-				return context.powerOn == ('1' == feedback.options.state)
+			callback: (feedback) => self.powerOn == ('1' == feedback.options.state),
+		},
+		media: {
+			type: 'boolean',
+			name: 'Selected Media',
+			description: 'Change button style when the selected media matches',
+			defaultStyle: {
+				bgcolor: combineRgb(0, 0, 153),
+				color: combineRgb(255, 255, 255),
 			},
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Media',
+					id: 'media',
+					default: 'S1',
+					choices: optChoices('MM'),
+				},
+			],
+			callback: (feedback) => self.rawStat.MM == feedback.options.media,
+		},
+		rec_input: {
+			type: 'boolean',
+			name: 'Recording Input',
+			description: 'Change button style when the recording input matches',
+			defaultStyle: {
+				bgcolor: combineRgb(0, 0, 153),
+				color: combineRgb(255, 255, 255),
+			},
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Input',
+					id: 'input',
+					default: 'BA',
+					choices: optChoices('IN'),
+				},
+			],
+			callback: (feedback) => self.rawStat.IN == feedback.options.input,
 		},
 	}
-	return actionDefs
 }

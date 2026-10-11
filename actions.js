@@ -1,4 +1,3 @@
-import { Regex } from '@companion-module/base'
 import * as CHOICES from './choices.js'
 
 export function compileActionDefinitions(self) {
@@ -6,75 +5,32 @@ export function compileActionDefinitions(self) {
 		return ('0'.repeat(len) + num).slice(-len)
 	}
 
-	return {
-		power: {
-			name: 'Power',
+	// simple 'pick a command from a list' action
+	function listAction(name, choices, refresh = []) {
+		return {
+			name,
 			options: [
-				{
-					type: 'dropdown',
-					id: 'sel_cmd',
-					label: 'Option',
-					default: CHOICES.POWER[0].id,
-					choices: CHOICES.POWER,
-				},
-			],
-			callback: async (action, context) => {
-				await self.sendCommand(action.options.sel_cmd, true)
-			},
-		},
-		record: {
-			name: 'Record Functions',
-			options: [
-				{
-					type: 'static-text',
-					id: 'info',
-					label: 'Recording Control',
-					width: 12,
-				},
 				{
 					type: 'dropdown',
 					id: 'sel_cmd',
 					label: 'Command',
-					default: '2353',
-					choices: CHOICES.RECORD_ACTIONS,
+					default: choices[0].id,
+					choices,
 				},
 			],
-			callback: async (action, context) => {
-				await self.sendCommand(action.options.sel_cmd)
+			callback: async (action) => {
+				await self.sendCommand(action.options.sel_cmd, refresh)
 			},
-		},
-		track_playback: {
-			name: 'Track Playback',
-			options: [
-				{
-					type: 'static-text',
-					id: 'info',
-					label: 'Information',
-					width: 12,
-					value: 'Track Playback Control.',
-				},
-				{
-					type: 'dropdown',
-					id: 'sel_cmd',
-					label: 'Option',
-					default: '2353',
-					choices: CHOICES.TRACK_PLAYBACK,
-				},
-			],
-			callback: async (action, context) => {
-				await self.sendCommand(action.options.sel_cmd)
-			},
-		},
+		}
+	}
+
+	return {
+		power: listAction('Power', CHOICES.POWER, ['PW', 'ST']),
+		record: listAction('Record Functions', CHOICES.RECORD_ACTIONS, ['ST', 'OR']),
+		track_playback: listAction('Track Playback', CHOICES.TRACK_PLAYBACK, ['ST']),
 		track_selection: {
 			name: 'Track Selection',
 			options: [
-				{
-					type: 'static-text',
-					id: 'info',
-					label: 'Information',
-					width: 12,
-					value: 'Select Track',
-				},
 				{
 					type: 'dropdown',
 					id: 'sel_cmd',
@@ -89,46 +45,34 @@ export function compileActionDefinitions(self) {
 					min: 1,
 					max: 2000,
 					default: 1,
-					required: false,
-					range: false,
-					regex: Regex.NUMBER,
+					isVisible: (options) => options.sel_cmd == 'Tr',
 				},
 			],
-			callback: async (action, context) => {
+			callback: async (action) => {
 				let cmd = action.options.sel_cmd
-				if (action.options.sel_cmd == 'Tr') {
+				if (cmd == 'Tr') {
 					cmd += pad0(action.options.sel_val, 4)
 				}
-				await self.sendCommand(cmd)
+				await self.sendCommand(cmd, ['Tr', 'ST'])
 			},
 		},
-		panel_lock: {
-			name: 'Panel Lock/Unlock',
-			options: [
-				{
-					type: 'dropdown',
-					id: 'sel_cmd',
-					label: 'Option',
-					default: CHOICES.PANEL_LOCK[0].id,
-					choices: CHOICES.PANEL_LOCK,
-				},
-			],
-			callback: async (action, context) => {
-				await self.sendCommand(action.options.sel_cmd)
-			},
-		},
+		media_select: listAction('Media Selection', CHOICES.MEDIA_SELECT, ['MM', 'Tr', 'Tt']),
+		record_input: listAction('Record Input / Channels', CHOICES.RECORD_INPUT, ['IN', 'CH']),
+		record_monitor: listAction('Record Monitor / Input Volume', CHOICES.RECORD_MONITOR, ['Rm', 'VI', 'RV']),
+		record_format: listAction('Recording Format', CHOICES.RECORD_FORMAT, ['AF']),
+		panel_lock: listAction('Panel Lock/Unlock', CHOICES.PANEL_LOCK),
 		format: {
 			name: 'Format Current Media Source',
 			options: [
 				{
-					type: 'text',
+					type: 'static-text',
 					id: 'info',
 					label: 'Warning!',
 					width: 12,
-					value: 'This will ERASE the currently selected\nRecord Media!! ',
+					value: 'This will ERASE the currently selected Record Media!!',
 				},
 			],
-			callback: async (action, context) => {
+			callback: async () => {
 				await self.sendCommand('23FOMAT')
 			},
 		},
@@ -138,11 +82,11 @@ export function compileActionDefinitions(self) {
 				{
 					type: 'textinput',
 					id: 'cmd',
-					label: 'Command',
+					label: 'Command (without the @0 prefix)',
 					default: '',
 				},
 			],
-			callback: async (action, context) => {
+			callback: async (action) => {
 				await self.sendCommand(action.options.cmd)
 			},
 		},

@@ -78,4 +78,3 @@ The rs232 only models (DN-500R, DN-F450R, DN-F650R) require an Ethernet to RS232
 ## **V3.0.2**
 
 * Show 16-bit PCM correctly in the recording and track format variables
-* Releases are now built and published automatically on GitHub
